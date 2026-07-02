@@ -1,56 +1,75 @@
-import { useEffect } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
-import { HOME } from "@/constants/testIds";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { AnimatePresence } from "framer-motion";
+import { Toaster } from "@/components/ui/sonner";
+import { SoundProvider } from "@/context/SoundContext";
+import { PortfolioProvider } from "@/context/PortfolioContext";
+import { CommandCenterBackground } from "@/components/fx/CommandCenterBackground";
+import { CustomCursor } from "@/components/fx/CustomCursor";
+import { ScrollProgress } from "@/components/fx/ScrollProgress";
+import { ParticleBurst } from "@/components/fx/ParticleBurst";
+import { KonamiEasterEgg } from "@/components/fx/KonamiEasterEgg";
+import { CinematicLoader } from "@/components/fx/CinematicLoader";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+const Portfolio = lazy(() => import("@/pages/Portfolio"));
+const AdminLogin = lazy(() => import("@/pages/admin/AdminLogin"));
+const AdminApp = lazy(() => import("@/pages/admin/AdminApp"));
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
+function Shell() {
+    const location = useLocation();
+    const isAdminRoute = location.pathname.startsWith("/admin");
+    const [loaded, setLoaded] = useState(() => sessionStorage.getItem("kypau_loaded") === "1");
 
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
+    const handleComplete = useCallback(() => {
+        sessionStorage.setItem("kypau_loaded", "1");
+        setLoaded(true);
+    }, []);
 
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          data-testid={HOME.emergentLink}
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
+    // The cinematic loader plays only for the public portfolio, before it mounts.
+    const showLoader = !isAdminRoute && !loaded;
+
+    return (
+        <>
+            <CommandCenterBackground />
+            <CustomCursor />
+            <ParticleBurst />
+            <KonamiEasterEgg />
+            {!isAdminRoute && <ScrollProgress />}
+
+            <AnimatePresence mode="wait">
+                {showLoader && <CinematicLoader key="loader" onComplete={handleComplete} />}
+            </AnimatePresence>
+
+            {!showLoader && (
+                <Suspense fallback={<div className="min-h-screen" />}>
+                    <Routes>
+                        <Route
+                            path="/"
+                            element={
+                                <PortfolioProvider>
+                                    <Portfolio ready={loaded} />
+                                </PortfolioProvider>
+                            }
+                        />
+                        <Route path="/admin" element={<AdminLogin />} />
+                        <Route path="/admin/dashboard/*" element={<AdminApp />} />
+                    </Routes>
+                </Suspense>
+            )}
+            <Toaster position="top-right" theme="dark" />
+        </>
+    );
+}
 
 function App() {
-  return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
-  );
+    return (
+        <SoundProvider>
+            <BrowserRouter>
+                <Shell />
+            </BrowserRouter>
+        </SoundProvider>
+    );
 }
 
 export default App;

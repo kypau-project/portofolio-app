@@ -217,6 +217,134 @@ async def project_click(project_id: str):
     return {"success": True}
 
 
+# ---------- resume PDF ----------
+
+@api_router.get("/resume")
+async def download_resume():
+    from io import BytesIO
+    from fastapi.responses import Response
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as pdf_canvas
+
+    profile = await db.settings.find_one({"id": "profile"}) or PROFILE
+    experiences = await db.experiences.find().sort("order", 1).to_list(20)
+    skills = await db.skills.find().sort("order", 1).to_list(50)
+    certs = await db.certifications.find().sort("order", 1).to_list(20)
+
+    buf = BytesIO()
+    c = pdf_canvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    dark = HexColor("#050816")
+    cyan = HexColor("#00A8CC")
+    gray = HexColor("#444455")
+
+    y = h - 25 * mm
+    c.setFillColor(dark)
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(20 * mm, y, profile.get("name", ""))
+    y -= 8 * mm
+    c.setFillColor(cyan)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(20 * mm, y, profile.get("title", ""))
+    y -= 6 * mm
+    c.setFillColor(gray)
+    c.setFont("Helvetica", 9)
+    c.drawString(20 * mm, y, f"{profile.get('email','')}  |  {profile.get('phone','')}  |  {profile.get('location','')}")
+    y -= 5 * mm
+    c.drawString(20 * mm, y, f"LinkedIn: {profile.get('linkedin','')}  |  GitHub: {profile.get('github','')}")
+
+    def section(title, yy):
+        yy -= 10 * mm
+        c.setFillColor(cyan)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(20 * mm, yy, title.upper())
+        c.setStrokeColor(cyan)
+        c.line(20 * mm, yy - 2 * mm, w - 20 * mm, yy - 2 * mm)
+        return yy - 7 * mm
+
+    def wrap_text(text, max_chars=105):
+        words, lines, cur = text.split(), [], ""
+        for word in words:
+            if len(cur) + len(word) + 1 > max_chars:
+                lines.append(cur)
+                cur = word
+            else:
+                cur = f"{cur} {word}".strip()
+        if cur:
+            lines.append(cur)
+        return lines
+
+    y = section("Summary", y)
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 9)
+    for line in wrap_text(profile.get("summary", "")):
+        c.drawString(20 * mm, y, line)
+        y -= 4.5 * mm
+
+    y = section("Experience & Education", y)
+    for exp in experiences:
+        c.setFillColor(dark)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(20 * mm, y, f"{exp['role']} — {exp['organization']}")
+        c.setFont("Helvetica-Oblique", 8)
+        c.setFillColor(gray)
+        c.drawRightString(w - 20 * mm, y, exp["period"])
+        y -= 4.5 * mm
+        c.setFont("Helvetica", 8.5)
+        for line in wrap_text(exp.get("description", ""), 115):
+            c.drawString(22 * mm, y, line)
+            y -= 4 * mm
+        y -= 3 * mm
+
+    y = section("Core Skills", y)
+    c.setFillColor(dark)
+    c.setFont("Helvetica", 9)
+    by_cat = {}
+    for s in skills:
+        by_cat.setdefault(s["category"], []).append(s["name"])
+    for cat, names in by_cat.items():
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(20 * mm, y, f"{cat}:")
+        c.setFont("Helvetica", 8.5)
+        for line in wrap_text(", ".join(names), 100):
+            c.drawString(60 * mm, y, line)
+            y -= 4.5 * mm
+
+    y = section("Certifications", y)
+    c.setFont("Helvetica", 8.5)
+    for cert in certs:
+        c.drawString(20 * mm, y, f"• {cert['title']} — {cert['issuer']} ({cert['year']})")
+        y -= 4.5 * mm
+        if y < 20 * mm:
+            break
+
+    c.save()
+    buf.seek(0)
+    return Response(
+        content=buf.read(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=Muhammad_Dzaky_Fauzan_Resume.pdf"},
+    )
+
+
+# ---------- GitHub events (activity heatmap) ----------
+
+@api_router.get("/github/events")
+async def github_events():
+    try:
+        data = await github_cached("events", f"https://api.github.com/orgs/{GITHUB_ORG}/events?per_page=100")
+    except HTTPException:
+        return {"days": []}
+    counts = {}
+    for ev in data:
+        d = (ev.get("created_at") or "")[:10]
+        if d:
+            counts[d] = counts.get(d, 0) + 1
+    return {"days": [{"date": k, "count": v} for k, v in sorted(counts.items())]}
+
+
 # ---------- GitHub proxy ----------
 
 def _fetch_github(url: str):
