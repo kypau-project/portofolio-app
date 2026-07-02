@@ -79,17 +79,17 @@ function CoreObject({ mouse }) {
 
             {/* connection lines */}
             {lines.map((seg, i) => (
-                <Line key={i} points={seg} color="#00D9FF" lineWidth={0.6} transparent opacity={0.35} />
+                <Line key={i} points={seg} color="#00D9FF" lineWidth={0.5} transparent opacity={0.18} />
             ))}
 
             {/* orbiting nodes */}
             {nodes.map((p, i) => (
                 <Float key={i} speed={2} rotationIntensity={0} floatIntensity={0.6}>
-                    <Sphere args={[0.06, 12, 12]} position={p.toArray()}>
+                    <Sphere args={[0.05, 12, 12]} position={p.toArray()}>
                         <meshStandardMaterial
                             color={i % 3 === 0 ? "#00FFB3" : i % 3 === 1 ? "#00D9FF" : "#8B5CF6"}
                             emissive={i % 3 === 0 ? "#00FFB3" : i % 3 === 1 ? "#00D9FF" : "#8B5CF6"}
-                            emissiveIntensity={2}
+                            emissiveIntensity={1.2}
                         />
                     </Sphere>
                 </Float>
@@ -120,7 +120,7 @@ function Particles({ count = 260 }) {
             <bufferGeometry>
                 <bufferAttribute attach="attributes-position" count={count} array={positions} itemSize={3} />
             </bufferGeometry>
-            <pointsMaterial size={0.035} color="#00D9FF" transparent opacity={0.7} sizeAttenuation />
+            <pointsMaterial size={0.03} color="#00D9FF" transparent opacity={0.45} sizeAttenuation />
         </points>
     );
 }
@@ -156,7 +156,7 @@ export default function HeroCore() {
                 <Particles />
                 <Rig mouse={mouse} />
                 <EffectComposer>
-                    <Bloom intensity={0.9} luminanceThreshold={0.15} luminanceSmoothing={0.9} mipmapBlur />
+                    <Bloom intensity={0.5} luminanceThreshold={0.25} luminanceSmoothing={0.9} mipmapBlur />
                 </EffectComposer>
             </Canvas>
         </div>

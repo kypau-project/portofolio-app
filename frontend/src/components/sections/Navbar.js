@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Terminal, Lock } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Menu, X, Terminal } from "lucide-react";
 import { useSound } from "@/context/SoundContext";
 import { LiveClock } from "@/components/fx/LiveClock";
 
@@ -21,7 +20,6 @@ export const Navbar = () => {
     const [hidden, setHidden] = useState(false);
     const [active, setActive] = useState("hero");
     const [mobileOpen, setMobileOpen] = useState(false);
-    const navigate = useNavigate();
     const { play } = useSound();
 
     useEffect(() => {
@@ -110,13 +108,6 @@ export const Navbar = () => {
                             <LiveClock />
                         </div>
                         <button
-                            data-testid="navbar-admin-link"
-                            onClick={() => navigate("/admin")}
-                            className="hidden md:flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 hover:border-cyan-400/40 hover:text-cyan-300 transition-colors"
-                        >
-                            <Lock className="h-3.5 w-3.5" /> Admin
-                        </button>
-                        <button
                             data-testid="navbar-mobile-toggle"
                             onClick={() => setMobileOpen((o) => !o)}
                             className="grid h-9 w-9 place-items-center rounded-xl border border-white/15 bg-white/5 text-white lg:hidden"
@@ -150,12 +141,7 @@ export const Navbar = () => {
                                     {l.label}
                                 </motion.button>
                             ))}
-                            <button
-                                onClick={() => navigate("/admin")}
-                                className="mt-4 flex items-center gap-2 rounded-xl border border-cyan-400/30 px-5 py-2 text-cyan-300"
-                            >
-                                <Lock className="h-4 w-4" /> Admin Login
-                            </button>
+
                         </div>
                     </motion.div>
                 )}

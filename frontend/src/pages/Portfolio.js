@@ -12,7 +12,6 @@ import { Security } from "@/components/sections/Security";
 import { BugBounty } from "@/components/sections/BugBounty";
 import { Achievements } from "@/components/sections/Achievements";
 import { Certifications } from "@/components/sections/Certifications";
-import { GlobeSection } from "@/components/sections/GlobeSection";
 import { GitHubSection } from "@/components/sections/GitHubSection";
 import { Blog } from "@/components/sections/Blog";
 import { Contact } from "@/components/sections/Contact";
@@ -26,6 +25,11 @@ export default function Portfolio({ ready }) {
     const { data, loading, error } = usePortfolio();
     const reduced = useReducedMotion();
     const lenisRef = useRef(null);
+
+    // Always start at top of page on load
+    useEffect(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    }, []);
 
     useEffect(() => {
         if (reduced || !ready) return;
@@ -78,7 +82,6 @@ export default function Portfolio({ ready }) {
                 <BugBounty bugBounty={bug_bounty} />
                 <Achievements achievements={achievements} />
                 <Certifications certifications={certifications} />
-                <GlobeSection bugBounty={bug_bounty} />
                 <GitHubSection />
                 <Blog posts={blog_posts} />
                 <Contact profile={profile} />

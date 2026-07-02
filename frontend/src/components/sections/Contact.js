@@ -189,7 +189,6 @@ export const Contact = ({ profile }) => {
                                 <form onSubmit={handleCommand} className="mt-2 flex items-center gap-2">
                                     <span className="text-emerald-400">guest@kypau:~$</span>
                                     <input
-                                        autoFocus
                                         value={input}
                                         onChange={(e) => setInput(e.target.value)}
                                         data-testid="contact-terminal-input"

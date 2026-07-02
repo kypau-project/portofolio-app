@@ -99,9 +99,7 @@ export default function AdminLogin() {
                         </button>
                     </form>
 
-                    <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-3 text-center font-mono text-[11px] text-white/40">
-                        demo // user: <span className="text-cyan-300">admin</span> · pass: <span className="text-cyan-300">Kypau@2025</span>
-                    </div>
+
                 </div>
             </motion.div>
         </div>

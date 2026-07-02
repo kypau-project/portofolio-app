@@ -16,6 +16,11 @@ const Portfolio = lazy(() => import("@/pages/Portfolio"));
 const AdminLogin = lazy(() => import("@/pages/admin/AdminLogin"));
 const AdminApp = lazy(() => import("@/pages/admin/AdminApp"));
 
+// Prevent browser from restoring scroll position on page reload
+if ("scrollRestoration" in window.history) {
+    window.history.scrollRestoration = "manual";
+}
+
 function Shell() {
     const location = useLocation();
     const isAdminRoute = location.pathname.startsWith("/admin");

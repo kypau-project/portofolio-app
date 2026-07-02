@@ -228,6 +228,24 @@ async def download_resume():
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas as pdf_canvas
 
+    # Check if admin uploaded a custom resume
+    custom_resume = await db.resume.find_one({"id": "resume"})
+    if custom_resume and custom_resume.get("data"):
+        import base64
+        data_url = custom_resume["data"]
+        # Strip the data URL prefix to get raw base64
+        if "," in data_url:
+            b64_data = data_url.split(",", 1)[1]
+        else:
+            b64_data = data_url
+        pdf_bytes = base64.b64decode(b64_data)
+        filename = custom_resume.get("name", "Resume.pdf")
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     profile = await db.settings.find_one({"id": "profile"}) or PROFILE
     experiences = await db.experiences.find().sort("order", 1).to_list(20)
     skills = await db.skills.find().sort("order", 1).to_list(50)
@@ -582,8 +600,8 @@ async def delete_content(coll: str, item_id: str, username: str = Depends(get_cu
 
 @api_router.post("/admin/media")
 async def upload_media(media: MediaUpload, username: str = Depends(get_current_admin)):
-    if len(media.data) > 3_000_000:
-        raise HTTPException(status_code=413, detail="File too large (max ~2MB)")
+    if len(media.data) > 15_000_000:
+        raise HTTPException(status_code=413, detail="File too large (max ~10MB)")
     doc = {
         "id": str(uuid.uuid4()),
         "name": media.name,
@@ -633,6 +651,40 @@ async def update_settings(settings: dict, username: str = Depends(get_current_ad
 async def get_logs(limit: int = Query(50, ge=1, le=200), username: str = Depends(get_current_admin)):
     logs = clean_list(await db.activity_logs.find().sort("timestamp", -1).to_list(limit))
     return {"logs": logs, "total": len(logs)}
+
+
+# ---------- admin: resume upload ----------
+
+class ResumeUpload(BaseModel):
+    name: str
+    data: str  # base64 data URL
+    content_type: str = "application/pdf"
+
+
+@api_router.post("/admin/resume-upload")
+async def upload_resume(resume: ResumeUpload, username: str = Depends(get_current_admin)):
+    if resume.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+    if len(resume.data) > 15_000_000:
+        raise HTTPException(status_code=413, detail="File too large (max ~10MB)")
+    doc = {
+        "id": "resume",
+        "name": resume.name,
+        "data": resume.data,
+        "content_type": resume.content_type,
+        "updated_at": now_iso(),
+    }
+    await db.resume.replace_one({"id": "resume"}, doc, upsert=True)
+    await log_activity("upload_resume", f"Uploaded resume '{resume.name}'", username)
+    return {"name": resume.name, "updated_at": doc["updated_at"]}
+
+
+@api_router.get("/admin/resume-info")
+async def get_resume_info(username: str = Depends(get_current_admin)):
+    doc = await db.resume.find_one({"id": "resume"})
+    if not doc:
+        return {"name": None}
+    return {"name": doc.get("name"), "updated_at": doc.get("updated_at")}
 
 
 app.include_router(api_router)

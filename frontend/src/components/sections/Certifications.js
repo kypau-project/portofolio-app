@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, BadgeCheck, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, BadgeCheck, X, ImageIcon } from "lucide-react";
 import { SectionHeader } from "@/components/fx/SectionHeader";
 
 const COLORS = {
@@ -61,7 +61,12 @@ export const Certifications = ({ certifications = [] }) => {
                             >
                                 <div className="flex items-center justify-between">
                                     <BadgeCheck className="h-7 w-7" style={{ color }} />
-                                    <span className="font-mono text-xs text-white/40">{c.year}</span>
+                                    <div className="flex items-center gap-2">
+                                        {c.image_url && (
+                                            <ImageIcon className="h-4 w-4 opacity-50" style={{ color }} />
+                                        )}
+                                        <span className="font-mono text-xs text-white/40">{c.year}</span>
+                                    </div>
                                 </div>
                                 <div>
                                     <div className="font-mono text-[10px] uppercase tracking-widest" style={{ color }}>{c.category}</div>
@@ -104,21 +109,47 @@ export const Certifications = ({ certifications = [] }) => {
                         className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
                     >
                         <motion.div
-                            initial={{ scale: 0.9, rotateY: -20, opacity: 0 }}
-                            animate={{ scale: 1, rotateY: 0, opacity: 1 }}
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.9, opacity: 0 }}
                             onClick={(e) => e.stopPropagation()}
-                            className="glass-panel-strong relative w-full max-w-md p-8 text-center"
-                            style={{ boxShadow: `0 0 60px ${COLORS[expanded.color] || COLORS.cyan}44` }}
+                            className="glass-panel-strong relative w-full max-w-lg overflow-y-auto rounded-2xl text-center"
+                            style={{
+                                boxShadow: `0 0 60px ${COLORS[expanded.color] || COLORS.cyan}44`,
+                                maxHeight: "90dvh",
+                            }}
                         >
-                            <button onClick={() => setExpanded(null)} className="absolute right-4 top-4 text-white/60 hover:text-white">
-                                <X className="h-5 w-5" />
+                            {/* sticky close button */}
+                            <button
+                                onClick={() => setExpanded(null)}
+                                className="sticky top-0 z-10 ml-auto flex justify-end p-3"
+                            >
+                                <span className="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-white/60 hover:bg-white/20 hover:text-white">
+                                    <X className="h-4 w-4" />
+                                </span>
                             </button>
-                            <BadgeCheck className="mx-auto h-14 w-14" style={{ color: COLORS[expanded.color] || COLORS.cyan }} />
-                            <h3 className="mt-4 font-display text-2xl font-bold text-white">{expanded.title}</h3>
-                            <p className="mt-2 text-white/60">{expanded.issuer}</p>
-                            <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-1.5 font-mono text-sm text-cyan-300">
-                                {expanded.category} · {expanded.year}
+
+                            {/* scrollable content */}
+                            <div className="px-6 pb-8 pt-0 text-center">
+                                <BadgeCheck className="mx-auto h-12 w-12 sm:h-14 sm:w-14" style={{ color: COLORS[expanded.color] || COLORS.cyan }} />
+                                <h3 className="mt-4 font-display text-xl font-bold text-white sm:text-2xl">{expanded.title}</h3>
+                                <p className="mt-2 text-sm text-white/60 sm:text-base">{expanded.issuer}</p>
+                                <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/10 px-4 py-1.5 font-mono text-sm text-cyan-300">
+                                    {expanded.category} · {expanded.year}
+                                </div>
+
+                                {/* Certificate image */}
+                                {expanded.image_url && (
+                                    <div className="mt-6">
+                                        <img
+                                            src={expanded.image_url}
+                                            alt={`${expanded.title} certificate`}
+                                            className="mx-auto w-full rounded-xl border border-white/10 object-contain shadow-lg"
+                                            style={{ maxHeight: "50vh" }}
+                                            onError={(e) => { e.target.style.display = "none"; }}
+                                        />
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     </motion.div>

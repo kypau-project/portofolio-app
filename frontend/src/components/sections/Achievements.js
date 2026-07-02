@@ -1,6 +1,6 @@
-import React from "react";
-import { motion } from "framer-motion";
-import { Rocket, Globe, GraduationCap, Shield, Newspaper, Building2, Award } from "lucide-react";
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Rocket, Globe, GraduationCap, Shield, Newspaper, Building2, Award, X, ImageIcon } from "lucide-react";
 import { SectionHeader } from "@/components/fx/SectionHeader";
 
 const ICONS = { rocket: Rocket, globe: Globe, graduation: GraduationCap, shield: Shield, newspaper: Newspaper, building: Building2 };
@@ -10,7 +10,7 @@ const TIER = {
     rare: { ring: "border-cyan-400/40", glow: "0 0 26px rgba(0,217,255,0.18)", text: "text-cyan-300", label: "RARE" },
 };
 
-function FlipCard({ item }) {
+function FlipCard({ item, onClick }) {
     const Icon = ICONS[item.icon] || Award;
     const tier = TIER[item.tier] || TIER.rare;
     return (
@@ -19,9 +19,10 @@ function FlipCard({ item }) {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-40px" }}
             transition={{ duration: 0.5 }}
-            className="group h-52 [perspective:1200px]"
+            className="group h-52 [perspective:1200px] cursor-pointer"
             data-cursor="card"
             data-testid={`achievement-${item.id}`}
+            onClick={() => item.image_url && onClick(item)}
         >
             <div className="relative h-full w-full transition-transform duration-700 [transform-style:preserve-3d] group-hover:[transform:rotateY(180deg)]">
                 {/* front */}
@@ -37,11 +38,17 @@ function FlipCard({ item }) {
                     <span className={`mt-3 rounded-full border px-2 py-0.5 font-mono text-[9px] tracking-widest ${tier.ring} ${tier.text}`}>
                         {tier.label}
                     </span>
+                    {item.image_url && (
+                        <span className="mt-2 font-mono text-[9px] text-white/30">Click to view certificate</span>
+                    )}
                 </div>
                 {/* back */}
                 <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#070B1F]/90 p-5 text-center [backface-visibility:hidden] [transform:rotateY(180deg)]">
                     <p className="text-xs leading-relaxed text-white/70">{item.description}</p>
                     <span className="mt-3 font-mono text-xs text-cyan-300">{item.year}</span>
+                    {item.image_url && (
+                        <span className="mt-2 font-mono text-[9px] text-cyan-300/60">📷 Click to view image</span>
+                    )}
                 </div>
             </div>
         </motion.div>
@@ -49,14 +56,59 @@ function FlipCard({ item }) {
 }
 
 export const Achievements = ({ achievements = [] }) => {
+    const [imageItem, setImageItem] = useState(null);
+
     return (
         <section id="achievements" className="relative mx-auto max-w-6xl px-4 py-20 sm:px-6 md:py-28">
             <SectionHeader index="07" meta="// hall of fame" title="Recognitions & Hall of Fame" subtitle="Acknowledged by leading organizations for responsible security disclosures. Hover a card to reveal details." />
             <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
                 {achievements.map((a) => (
-                    <FlipCard key={a.id} item={a} />
+                    <FlipCard key={a.id} item={a} onClick={setImageItem} />
                 ))}
             </div>
+
+            <AnimatePresence>
+                {imageItem && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setImageItem(null)}
+                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="glass-panel-strong relative w-full max-w-xl overflow-y-auto rounded-2xl"
+                            style={{ maxHeight: "90dvh" }}
+                        >
+                            {/* sticky close */}
+                            <button
+                                onClick={() => setImageItem(null)}
+                                className="sticky top-0 z-10 ml-auto flex justify-end p-3"
+                            >
+                                <span className="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-white/60 hover:bg-white/20 hover:text-white">
+                                    <X className="h-4 w-4" />
+                                </span>
+                            </button>
+                            <div className="px-5 pb-6 pt-0 text-center">
+                                <h3 className="font-display text-lg font-bold text-white sm:text-xl">{imageItem.title}</h3>
+                                <p className="mt-1 text-sm text-white/50">{imageItem.subtitle}</p>
+                                <img
+                                    src={imageItem.image_url}
+                                    alt={imageItem.title}
+                                    className="mt-4 mx-auto w-full rounded-xl border border-white/10 object-contain shadow-lg"
+                                    style={{ maxHeight: "55vh" }}
+                                    onError={(e) => { e.target.style.display = "none"; }}
+                                />
+                                <p className="mt-3 font-mono text-xs text-white/30">{imageItem.year}</p>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </section>
     );
 };
