@@ -1,0 +1,34 @@
+[
+  {
+    "content": "Phase 1: Build complete backend (auth, contact, CRUD, analytics, GitHub proxy, media, seed CV data)",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 1: POC test script (login, contact flow, GitHub proxy) — run & fix until passing",
+    "status": "completed"
+  },
+  {
+    "content": "Phase 2: Get design guidelines from design_agent",
+    "status": "in_progress"
+  },
+  {
+    "content": "Phase 2: Frontend foundations (loader, cursor, backgrounds, navbar, Lenis, routing)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Public portfolio sections (Hero 3D, About, Skills, Experience, Projects, Security, BugBounty, Achievements, Certifications, Globe, GitHub, Blog, Contact terminal, Footer)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Admin dashboard (login, overview, inbox, managers, media, analytics, settings, logs)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: Special features (command palette, scroll progress, rocket, konami, sound toggle, clock)",
+    "status": "pending"
+  },
+  {
+    "content": "Phase 2: End to End Testing using Testing Agent + fix all issues",
+    "status": "pending"
+  }
+]

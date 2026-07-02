@@ -1,0 +1,523 @@
+"""KYPAU Portfolio API - FastAPI + MongoDB backend."""
+import asyncio
+import logging
+import os
+import time
+import uuid
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import List, Optional
+
+import requests as http_requests
+from dotenv import load_dotenv
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorClient
+from pydantic import BaseModel, EmailStr, Field
+from starlette.middleware.cors import CORSMiddleware
+
+from auth import create_token, get_current_admin, hash_password, verify_password
+from seed_data import (ACHIEVEMENTS, BLOG_POSTS, BUG_BOUNTY, CERTIFICATIONS,
+                       EXPERIENCES, PROFILE, PROJECTS, SKILLS)
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+app = FastAPI(title="KYPAU Portfolio API")
+api_router = APIRouter(prefix="/api")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+ADMIN_USERNAME = "admin"
+ADMIN_DEFAULT_PASSWORD = "Kypau@2025"
+GITHUB_ORG = "kypau-org"
+GITHUB_CACHE_TTL = 600  # 10 minutes
+
+_github_cache = {}
+
+CONTENT_COLLECTIONS = {"projects", "certifications", "achievements", "skills", "experiences", "blog_posts"}
+
+
+# ---------- helpers ----------
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def clean(doc):
+    """Remove Mongo _id from a document."""
+    if doc and "_id" in doc:
+        doc.pop("_id")
+    return doc
+
+
+def clean_list(docs):
+    return [clean(d) for d in docs]
+
+
+async def log_activity(action: str, detail: str, actor: str = "admin"):
+    await db.activity_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": action,
+        "detail": detail,
+        "actor": actor,
+        "timestamp": now_iso(),
+    })
+
+
+# ---------- models ----------
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
+class ContactMessage(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: EmailStr
+    message: str = Field(min_length=5, max_length=5000)
+
+
+class TrackRequest(BaseModel):
+    page: str = "/"
+    referrer: str = ""
+
+
+class MediaUpload(BaseModel):
+    name: str
+    data: str  # base64 data URL
+    content_type: str = "image/png"
+    category: str = "general"
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: List[str]
+
+
+# ---------- startup seeding ----------
+
+async def seed_database():
+    # Admin user
+    existing = await db.users.find_one({"username": ADMIN_USERNAME})
+    if not existing:
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "username": ADMIN_USERNAME,
+            "password_hash": hash_password(ADMIN_DEFAULT_PASSWORD),
+            "role": "admin",
+            "created_at": now_iso(),
+        })
+        logger.info("Seeded admin user")
+
+    # Profile / settings
+    if not await db.settings.find_one({"id": "profile"}):
+        await db.settings.insert_one(dict(PROFILE))
+        logger.info("Seeded profile settings")
+
+    # Content collections
+    seeds = {
+        "projects": PROJECTS,
+        "certifications": CERTIFICATIONS,
+        "achievements": ACHIEVEMENTS,
+        "skills": SKILLS,
+        "experiences": EXPERIENCES,
+        "blog_posts": BLOG_POSTS,
+    }
+    for coll_name, data in seeds.items():
+        if await db[coll_name].count_documents({}) == 0:
+            await db[coll_name].insert_many([dict(d) for d in data])
+            logger.info(f"Seeded {coll_name} ({len(data)} docs)")
+
+    if not await db.bug_bounty.find_one({"id": "bugbounty"}):
+        await db.bug_bounty.insert_one(dict(BUG_BOUNTY))
+        logger.info("Seeded bug bounty data")
+
+
+@app.on_event("startup")
+async def startup_event():
+    await seed_database()
+
+
+# ---------- public routes ----------
+
+@api_router.get("/")
+async def root():
+    return {"message": "KYPAU Portfolio API", "status": "operational"}
+
+
+@api_router.get("/portfolio")
+async def get_portfolio():
+    profile = clean(await db.settings.find_one({"id": "profile"}))
+    skills = clean_list(await db.skills.find().sort("order", 1).to_list(200))
+    projects = clean_list(await db.projects.find().sort("order", 1).to_list(100))
+    experiences = clean_list(await db.experiences.find().sort("order", 1).to_list(100))
+    achievements = clean_list(await db.achievements.find().sort("order", 1).to_list(100))
+    certifications = clean_list(await db.certifications.find().sort("order", 1).to_list(100))
+    bug_bounty = clean(await db.bug_bounty.find_one({"id": "bugbounty"}))
+    blog_posts = clean_list(await db.blog_posts.find().sort("date", -1).to_list(50))
+    return {
+        "profile": profile,
+        "skills": skills,
+        "projects": projects,
+        "experiences": experiences,
+        "achievements": achievements,
+        "certifications": certifications,
+        "bug_bounty": bug_bounty,
+        "blog_posts": blog_posts,
+    }
+
+
+@api_router.post("/contact")
+async def submit_contact(msg: ContactMessage):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": msg.name,
+        "email": msg.email,
+        "message": msg.message,
+        "read": False,
+        "created_at": now_iso(),
+    }
+    await db.messages.insert_one(dict(doc))
+    return {"success": True, "message": "Secure message transmitted.", "id": doc["id"]}
+
+
+@api_router.post("/analytics/track")
+async def track_visit(req: TrackRequest):
+    await db.page_views.insert_one({
+        "id": str(uuid.uuid4()),
+        "page": req.page,
+        "referrer": req.referrer,
+        "timestamp": now_iso(),
+        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+    })
+    total = await db.page_views.count_documents({})
+    return {"success": True, "total_views": total}
+
+
+@api_router.get("/analytics/visitor-count")
+async def visitor_count():
+    total = await db.page_views.count_documents({})
+    return {"total_views": total}
+
+
+@api_router.post("/projects/{project_id}/click")
+async def project_click(project_id: str):
+    result = await db.projects.update_one({"id": project_id}, {"$inc": {"clicks": 1}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"success": True}
+
+
+# ---------- GitHub proxy ----------
+
+def _fetch_github(url: str):
+    resp = http_requests.get(url, timeout=15, headers={"Accept": "application/vnd.github+json", "User-Agent": "kypau-portfolio"})
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def github_cached(key: str, url: str):
+    cached = _github_cache.get(key)
+    if cached and cached[1] > time.time():
+        return cached[0]
+    try:
+        data = await asyncio.to_thread(_fetch_github, url)
+        _github_cache[key] = (data, time.time() + GITHUB_CACHE_TTL)
+        # persist backup
+        await db.github_cache.update_one(
+            {"key": key}, {"$set": {"key": key, "data": data, "updated_at": now_iso()}}, upsert=True
+        )
+        return data
+    except Exception as e:
+        logger.warning(f"GitHub fetch failed for {key}: {e}")
+        if cached:
+            return cached[0]
+        backup = await db.github_cache.find_one({"key": key})
+        if backup:
+            return backup["data"]
+        raise HTTPException(status_code=502, detail="GitHub API unavailable")
+
+
+@api_router.get("/github/org")
+async def github_org():
+    data = await github_cached("org", f"https://api.github.com/orgs/{GITHUB_ORG}")
+    return data
+
+
+@api_router.get("/github/repos")
+async def github_repos():
+    data = await github_cached("repos", f"https://api.github.com/orgs/{GITHUB_ORG}/repos?per_page=100&sort=updated")
+    slim = [
+        {
+            "id": r.get("id"),
+            "name": r.get("name"),
+            "full_name": r.get("full_name"),
+            "description": r.get("description"),
+            "html_url": r.get("html_url"),
+            "language": r.get("language"),
+            "stargazers_count": r.get("stargazers_count", 0),
+            "forks_count": r.get("forks_count", 0),
+            "watchers_count": r.get("watchers_count", 0),
+            "open_issues_count": r.get("open_issues_count", 0),
+            "topics": r.get("topics", []),
+            "updated_at": r.get("updated_at"),
+            "created_at": r.get("created_at"),
+            "fork": r.get("fork", False),
+        }
+        for r in data
+    ]
+    return {"repos": slim, "count": len(slim)}
+
+
+# ---------- auth ----------
+
+@api_router.post("/auth/login")
+async def login(req: LoginRequest):
+    user = await db.users.find_one({"username": req.username})
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_token(user["username"])
+    await log_activity("login", f"Admin '{req.username}' logged in", req.username)
+    return {"access_token": token, "token_type": "bearer", "username": user["username"]}
+
+
+@api_router.get("/auth/me")
+async def me(username: str = Depends(get_current_admin)):
+    return {"username": username, "role": "admin"}
+
+
+@api_router.post("/auth/change-password")
+async def change_password(req: ChangePasswordRequest, username: str = Depends(get_current_admin)):
+    user = await db.users.find_one({"username": username})
+    if not user or not verify_password(req.current_password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    await db.users.update_one({"username": username}, {"$set": {"password_hash": hash_password(req.new_password)}})
+    await log_activity("password_change", "Admin password updated", username)
+    return {"success": True, "message": "Password updated"}
+
+
+# ---------- admin: stats & analytics ----------
+
+@api_router.get("/admin/stats")
+async def admin_stats(username: str = Depends(get_current_admin)):
+    total_views = await db.page_views.count_documents({})
+    total_messages = await db.messages.count_documents({})
+    unread_messages = await db.messages.count_documents({"read": False})
+    total_projects = await db.projects.count_documents({})
+    bug_bounty = await db.bug_bounty.find_one({"id": "bugbounty"})
+    vulns = sum(s["count"] for s in bug_bounty.get("severity_distribution", [])) if bug_bounty else 0
+    project_clicks = 0
+    async for p in db.projects.find({}, {"clicks": 1}):
+        project_clicks += p.get("clicks", 0)
+    recent_messages = clean_list(await db.messages.find().sort("created_at", -1).to_list(5))
+    return {
+        "total_views": total_views,
+        "total_messages": total_messages,
+        "unread_messages": unread_messages,
+        "total_projects": total_projects,
+        "vulnerabilities_found": vulns,
+        "project_clicks": project_clicks,
+        "recent_messages": recent_messages,
+    }
+
+
+@api_router.get("/admin/analytics")
+async def admin_analytics(days: int = 30, username: str = Depends(get_current_admin)):
+    start = datetime.now(timezone.utc) - timedelta(days=days)
+    start_date = start.strftime("%Y-%m-%d")
+    pipeline = [
+        {"$match": {"date": {"$gte": start_date}}},
+        {"$group": {"_id": "$date", "views": {"$sum": 1}}},
+        {"$sort": {"_id": 1}},
+    ]
+    daily = await db.page_views.aggregate(pipeline).to_list(days + 1)
+    series = [{"date": d["_id"], "views": d["views"]} for d in daily]
+    top_pipeline = [
+        {"$group": {"_id": "$page", "views": {"$sum": 1}}},
+        {"$sort": {"views": -1}},
+        {"$limit": 10},
+    ]
+    top_pages = await db.page_views.aggregate(top_pipeline).to_list(10)
+    return {
+        "daily_views": series,
+        "top_pages": [{"page": t["_id"], "views": t["views"]} for t in top_pages],
+        "total_views": await db.page_views.count_documents({}),
+    }
+
+
+# ---------- admin: messages ----------
+
+@api_router.get("/admin/messages")
+async def get_messages(
+    search: str = "",
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    username: str = Depends(get_current_admin),
+):
+    query = {}
+    if search:
+        query = {"$or": [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"message": {"$regex": search, "$options": "i"}},
+        ]}
+    total = await db.messages.count_documents(query)
+    msgs = clean_list(
+        await db.messages.find(query).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
+    )
+    return {"messages": msgs, "total": total, "page": page, "pages": max(1, -(-total // limit))}
+
+
+@api_router.patch("/admin/messages/{msg_id}/read")
+async def mark_read(msg_id: str, username: str = Depends(get_current_admin)):
+    result = await db.messages.update_one({"id": msg_id}, {"$set": {"read": True}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"success": True}
+
+
+@api_router.delete("/admin/messages/{msg_id}")
+async def delete_message(msg_id: str, username: str = Depends(get_current_admin)):
+    result = await db.messages.delete_one({"id": msg_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await log_activity("delete_message", f"Deleted message {msg_id}", username)
+    return {"success": True}
+
+
+@api_router.post("/admin/messages/bulk-delete")
+async def bulk_delete_messages(req: BulkDeleteRequest, username: str = Depends(get_current_admin)):
+    result = await db.messages.delete_many({"id": {"$in": req.ids}})
+    await log_activity("bulk_delete_messages", f"Deleted {result.deleted_count} messages", username)
+    return {"success": True, "deleted": result.deleted_count}
+
+
+# ---------- admin: generic content CRUD ----------
+
+def _validate_collection(coll: str):
+    if coll not in CONTENT_COLLECTIONS:
+        raise HTTPException(status_code=404, detail=f"Unknown collection '{coll}'")
+
+
+@api_router.get("/admin/content/{coll}")
+async def list_content(coll: str, username: str = Depends(get_current_admin)):
+    _validate_collection(coll)
+    items = clean_list(await db[coll].find().sort("order", 1).to_list(500))
+    return {"items": items, "total": len(items)}
+
+
+@api_router.post("/admin/content/{coll}")
+async def create_content(coll: str, item: dict, username: str = Depends(get_current_admin)):
+    _validate_collection(coll)
+    item.pop("_id", None)
+    item["id"] = item.get("id") or str(uuid.uuid4())
+    item["created_at"] = now_iso()
+    await db[coll].insert_one(dict(item))
+    await log_activity("create", f"Created item in {coll}: {item.get('title') or item.get('name') or item.get('role') or item['id']}", username)
+    return clean(item)
+
+
+@api_router.put("/admin/content/{coll}/{item_id}")
+async def update_content(coll: str, item_id: str, item: dict, username: str = Depends(get_current_admin)):
+    _validate_collection(coll)
+    item.pop("_id", None)
+    item.pop("id", None)
+    item["updated_at"] = now_iso()
+    result = await db[coll].update_one({"id": item_id}, {"$set": item})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await log_activity("update", f"Updated item {item_id} in {coll}", username)
+    updated = clean(await db[coll].find_one({"id": item_id}))
+    return updated
+
+
+@api_router.delete("/admin/content/{coll}/{item_id}")
+async def delete_content(coll: str, item_id: str, username: str = Depends(get_current_admin)):
+    _validate_collection(coll)
+    result = await db[coll].delete_one({"id": item_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await log_activity("delete", f"Deleted item {item_id} from {coll}", username)
+    return {"success": True}
+
+
+# ---------- admin: media ----------
+
+@api_router.post("/admin/media")
+async def upload_media(media: MediaUpload, username: str = Depends(get_current_admin)):
+    if len(media.data) > 3_000_000:
+        raise HTTPException(status_code=413, detail="File too large (max ~2MB)")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": media.name,
+        "data": media.data,
+        "content_type": media.content_type,
+        "category": media.category,
+        "created_at": now_iso(),
+    }
+    await db.media.insert_one(dict(doc))
+    await log_activity("upload_media", f"Uploaded media '{media.name}'", username)
+    return clean(doc)
+
+
+@api_router.get("/admin/media")
+async def list_media(username: str = Depends(get_current_admin)):
+    items = clean_list(await db.media.find().sort("created_at", -1).to_list(200))
+    return {"items": items, "total": len(items)}
+
+
+@api_router.delete("/admin/media/{media_id}")
+async def delete_media(media_id: str, username: str = Depends(get_current_admin)):
+    result = await db.media.delete_one({"id": media_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Media not found")
+    await log_activity("delete_media", f"Deleted media {media_id}", username)
+    return {"success": True}
+
+
+# ---------- admin: settings & logs ----------
+
+@api_router.get("/admin/settings")
+async def get_settings(username: str = Depends(get_current_admin)):
+    return clean(await db.settings.find_one({"id": "profile"}))
+
+
+@api_router.put("/admin/settings")
+async def update_settings(settings: dict, username: str = Depends(get_current_admin)):
+    settings.pop("_id", None)
+    settings.pop("id", None)
+    settings["updated_at"] = now_iso()
+    await db.settings.update_one({"id": "profile"}, {"$set": settings})
+    await log_activity("update_settings", "Updated profile settings", username)
+    return clean(await db.settings.find_one({"id": "profile"}))
+
+
+@api_router.get("/admin/logs")
+async def get_logs(limit: int = Query(50, ge=1, le=200), username: str = Depends(get_current_admin)):
+    logs = clean_list(await db.activity_logs.find().sort("timestamp", -1).to_list(limit))
+    return {"logs": logs, "total": len(logs)}
+
+
+app.include_router(api_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
